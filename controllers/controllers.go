@@ -11,6 +11,8 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/luongquochai/ecommerce_golang/database"
 	"github.com/luongquochai/ecommerce_golang/models"
+	generate "github.com/luongquochai/ecommerce_golang/tokens"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
@@ -33,15 +35,15 @@ func HashPassword(password string) string {
 
 func VerifyPassword(userPassword string, givenPassword string) (bool, string) {
 	//compare password from backend <db> with given password
-	
+
 	err := bcrypt.CompareHashAndPassword([]byte(givenPassword), []byte(userPassword))
 	valid := true
 	msg := ""
 
-	if err!= nil {
-        valid = false
-        msg = "Login or Password is incorrect"
-    }
+	if err != nil {
+		valid = false
+		msg = "Login or Password is incorrect"
+	}
 	return valid, msg
 }
 
@@ -121,6 +123,7 @@ func Login() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
 		defer cancel()
+		var founduser models.User
 		var user models.User
 		if err := c.BindJSON(&user); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err})
@@ -155,7 +158,27 @@ func Login() gin.HandlerFunc {
 }
 
 func ProductViewerAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		var products models.Product
 
+		defer cancel()
+
+		if err := c.BindJSON(&products); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		products.Product_ID = primitive.NewObjectID()
+		_, anyerr := ProductCollection.InsertOne(ctx, products)
+		if anyerr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "not inserted"})
+			return
+		}
+
+		defer cancel()
+		c.JSON(http.StatusOK, "Successfully added")
+	}
 }
 
 func SearchProduct() gin.HandlerFunc {
@@ -163,25 +186,25 @@ func SearchProduct() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// create product List
 		var productList []models.Product
-		var ctx, cancel = context.WithTimeOut(context.Background(), 100*time.Second)
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
 
 		defer cancel()
 
 		// BSON data 'D': An ordered representation of aBSON document (slice)
-		cursor. err := ProductCollection.Find(ctx, bson.D{{}})
+		cursor, err := ProductCollection.Find(ctx, bson.D{{}})
 		if err != nil {
 			c.IndentedJSON(http.StatusInternalServerError, "something went wrong, please try after some time")
 			return
 		}
 
 		err = cursor.All(ctx, &productList)
-		if err!= nil {
-            log.Println(err)
+		if err != nil {
+			log.Println(err)
 			c.AbortWithStatus(http.StatusInternalServerError)
 			return
-        }
+		}
 
-		defer cursor.Close()
+		defer cursor.Close(ctx)
 
 		if err := cursor.Err(); err != nil {
 			log.Println(err)
@@ -205,10 +228,10 @@ func SearchProductByQuery() gin.HandlerFunc {
 		if queryParam == "" {
 			log.Println("query is empty")
 			c.Header("Content-Type", "application/json")
-			c.JSON(HTTP.StatusNotFound, gin.H{"Error": "Invalid search index"})
+			c.JSON(http.StatusNotFound, gin.H{"Error": "Invalid search index"})
 			c.Abort()
 			return
-        }
+		}
 
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
 		defer cancel()
@@ -228,7 +251,7 @@ func SearchProductByQuery() gin.HandlerFunc {
 			return
 		}
 		// close search query
-		defer searchQueryDB.Close()
+		defer searchQueryDB.Close(ctx)
 
 		if err := searchQueryDB.Err(); err != nil {
 			log.Println(err)
